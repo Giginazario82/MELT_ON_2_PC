@@ -1,2 +1,82 @@
 # MELT_ON_2_PC
-Esportare video con due PC 
+Esportare video con 2 PC 
+#!/bin/bash
+
+# 📂 **Definizione delle variabili**
+PROGETTO1="/home/giginazario82/Documenti/Imac/progetto_1.kdenlive"
+PROGETTO2="/home/giginazario82/Documenti/Imac/progetto_2.kdenlive"
+GREZZO="/home/giginazario82/Documenti/Imac/grezzo.mkv"
+DIR_PC1="/home/giginazario82/Documenti/Imac"
+TMP_FOLDER="/home/giginazario82/Documenti/Imac/temp_esportazione"
+MOUNT_PC2="/mnt/PC2_documenti"
+LOG_FILE="$HOME/pc_1.log"
+
+# 🛠 **Creazione della cartella temp_esportazione**
+echo "📁 Creazione della cartella temp_esportazione su PC1..." | tee -a "$LOG_FILE"
+mkdir -p "$TMP_FOLDER"
+chown -R gigiomicio82:users "$TMP_FOLDER"
+chmod -R 777 "$TMP_FOLDER"
+echo "✅ Cartella pronta con permessi giusti!" | tee -a "$LOG_FILE"
+
+# 📂 **Montaggio della condivisione di PC2 su PC1**
+sudo umount "$MOUNT_PC2" 2>/dev/null
+mkdir -p "$MOUNT_PC2"
+if sudo mount -t cifs //192.168.1.85/Documenti "$MOUNT_PC2" -o guest,uid=$(id -u),gid=$(id -g); then
+    echo "✅ Montaggio di PC2 riuscito!" | tee -a "$LOG_FILE"
+else
+    echo "❌ Errore nel montaggio di PC2!" | tee -a "$LOG_FILE"
+    exit 1
+fi
+
+# 📂 **Copia dei file su PC2 con permessi corretti**
+echo "📂 Copia dei file necessari per PC2..." | tee -a "$LOG_FILE"
+cp "$PROGETTO2" "$MOUNT_PC2/"
+cp "$GREZZO" "$MOUNT_PC2/"
+
+# 🛠 **Impostare i permessi corretti sui file copiati**
+chmod 777 "$MOUNT_PC2/progetto_2.kdenlive"
+chmod 777 "$MOUNT_PC2/grezzo.mkv"
+chown gigiomicio82:users "$MOUNT_PC2/progetto_2.kdenlive"
+chown gigiomicio82:users "$MOUNT_PC2/grezzo.mkv"
+
+echo "✅ File copiati e permessi aggiornati su PC2!" | tee -a "$LOG_FILE"
+
+# 🚀 **Avvio elaborazione su PC1**
+echo "🎬 Avvio elaborazione su PC1..." | tee -a "$LOG_FILE"
+nohup melt "$PROGETTO1" -consumer avformat:"$TMP_FOLDER/parte1.mkv" vcodec=h264_nvenc acodec=aac qp=20 preset=normal > /dev/null 2>&1 &
+
+echo "⌛ Attendo che PC1 e PC2 completino l'esportazione..." | tee -a "$LOG_FILE"
+
+# 🚀 **Avvio elaborazione su PC2**
+echo "🎬 Avvio elaborazione su PC2..." | tee -a "$LOG_FILE"
+ssh -p 2222 gigiomicio82@192.168.1.85 'bash /home/gigiomicio82/Documenti/pc_2.sh' 
+echo "✅ Comando inviato con successo!" | tee -a "$LOG_FILE"
+
+
+# 🔄 Attesa che PC1 abbia finito di scrivere parte1.mkv
+while [ ! -f "$TMP_FOLDER/parte1.mkv" ] || lsof "$TMP_FOLDER/parte1.mkv" > /dev/null; do
+    sleep 2
+    echo "⌛ PC1 sta ancora scrivendo parte1.mkv..." | tee -a "$LOG_FILE"
+done
+
+# 🔄 Attesa che PC2 abbia finito di scrivere parte2.mkv
+while [ ! -f "$TMP_FOLDER/parte2.mkv" ] || lsof "$TMP_FOLDER/parte2.mkv" > /dev/null; do
+    sleep 2
+    echo "⌛ PC2 sta ancora scrivendo parte2.mkv..." | tee -a "$LOG_FILE"
+done
+
+while [ ! -f /home/giginazario82/Documenti/Imac/temp_esportazione/parte2.mkv ]; do
+   sleep 6  # Aspetta 6 secondi e riprova
+done
+
+echo "✅ Entrambi i file sono pronti! Procediamo con l’unione." | tee -a "$LOG_FILE"
+
+# 🔗 **Unione dei file**
+echo "🛠 Unione video..." | tee -a "$LOG_FILE"
+echo "file '$TMP_FOLDER/parte1.mkv'" > "$TMP_FOLDER/file_list.txt"
+echo "file '$TMP_FOLDER/parte2.mkv'" >> "$TMP_FOLDER/file_list.txt"
+
+ffmpeg -f concat -safe 0 -i "$TMP_FOLDER/file_list.txt" -c copy "$DIR_PC1/video_finale.mkv"
+chmod -R 777 "$DIR_PC1/video_finale.mkv"
+
+echo "🚀 Esportazione COMPLETATA! 🎬 Video finale salvato in: $DIR_PC1/video_finale.mkv" | tee -a "$LOG_FILE"
